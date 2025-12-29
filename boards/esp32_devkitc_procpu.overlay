@@ -2,38 +2,32 @@
 #include <zephyr/dt-bindings/gpio/gpio.h>
 #include <zephyr/dt-bindings/spi/spi.h>
 
-// Configure SPI pins for Akira-Micro
-// Based on HARDWARE.md: IO5=MISO, IO18=SCK, IO19=MOSI
+// Configure SPI3 pins for SD Card
 &pinctrl
 {
-spim2_default:
-    spim2_default
+    spim3_default: spim3_default
     {
         group1
         {
-            pinmux = <SPIM2_MISO_GPIO5>,  // MISO - GPIO5
-                <SPIM2_MOSI_GPIO19>,      // MOSI - GPIO19
-                <SPIM2_SCLK_GPIO18>;      // SCK  - GPIO18
+            pinmux = <SPIM3_MISO_GPIO5>,   // MISO - GPIO5
+                <SPIM3_MOSI_GPIO19>,       // MOSI - GPIO19
+                <SPIM3_SCLK_GPIO18>;       // SCK  - GPIO18
         };
     };
 };
 
-&spi2 {
+&spi3 {
     status = "okay";
-    pinctrl-0 = <&spim2_default>;
+    pinctrl-0 = <&spim3_default>;
     pinctrl-names = "default";
-    // CS for SD Card on GPIO0
-    cs-gpios = <&gpio0 0 GPIO_ACTIVE_LOW>;
+    cs-gpios = <&gpio0 4 GPIO_ACTIVE_LOW>;
     
-    // SD Card on SPI
     sd_card: sdhc@0 {
-        compatible = "zephyr,sdhc-spi-slot";
+        compatible = "zephyr,sdhc-spi-slot"; 
         reg = <0>;
-        status = "okay";
-        spi-max-frequency = <24000000>;
+        spi-max-frequency = <400000>;
         mmc {
             compatible = "zephyr,sdmmc-disk";
-            status = "okay";
             disk-name = "SD";
         };
     };
@@ -102,6 +96,16 @@ spim2_default:
     };
 };
 
+// Flash memory partition for NVS
+&flash0 {
+    partitions {
+        akira_settings_nvs_partition: partition@256000 {
+            label = "akira_settings_nvs";
+            reg = <0x00256000 0x10000>; // 64 KB
+        };
+    };
+};
+
 // Chosen nodes for Zephyr configuration
 / {
     chosen {
@@ -110,9 +114,7 @@ spim2_default:
     };
     
     aliases {
-        user-data-partition = &storage_partition;
         led0 = &status_led;
-        spi-flash0 = &sd_card;
     };
     
     // Button definitions for Akira-Micro
