@@ -13,13 +13,15 @@
 #include <stddef.h>
 #include <stdbool.h>
 #include <stdint.h>
-#define DEFAULT_MAX_KEYS 32
-#define DEFAULT_MAX_VALUE_LEN 32
-#define REGISTRY_COUNTER_ID         0
-#define REGISTRY_MAX_VALUE_LEN_ID     1 
-#define REGISTRY_MAX_KEYS_ID          2
-#define REGISTRY_KEYS_START         3
-#define REGISTRY_KEYS_SIZE       100
+
+#define SETTINGS_COUNTER_ID 0
+#define SETTINGS_START_ID 1
+#define MAX_KEYS CONFIG_AKIRA_SETTINGS_MAX_KEYS
+#define MAX_KEY_LEN CONFIG_AKIRA_SETTINGS_MAX_KEY_LEN
+#define MAX_VALUE_LEN CONFIG_AKIRA_SETTINGS_MAX_VALUE_LEN
+#define MAX_NAMESPACE_LEN 48
+#define MAX_FILEPATH_LEN 96
+
 // Minimum encrypted: 2+12+16+1=31 bytes → 42 chars base64
 #define MINIMUM_ENCRYPTED_LEN 42
 
@@ -34,34 +36,28 @@
 
 // Iterator for listing all keys
 typedef struct {
-    void* ptr; 
-    char* key; // Current key 
-    char* value; // Current value
-    size_t key_buffer_size;
-    size_t value_buffer_size;
+    uint16_t index;  
+    uint16_t count;
+    char* key;   
+    char* value; 
 } settings_iterator_t;
-
 typedef enum{
     AKIRA_SETTINGS_STORAGE_FLASH = 0,
     AKIRA_SETTINGS_STORAGE_SD,
     AKIRA_SETTINGS_STORAGE_AUTO
 } settings_storage_type_t;
 
-typedef struct {
-    char **keys;
-    size_t count;
-    size_t index;
-} iter_data_t;
-
 typedef enum {
     AKIRA_SETTINGS_OP_SET,
     AKIRA_SETTINGS_OP_GET,
     AKIRA_SETTINGS_OP_DELETE,
     AKIRA_SETTINGS_OP_CLEAR,
-    AKIRA_SETTINGS_OP_LIST,
-    AKIRA_SETTINGS_OP_RESIZE
 } settings_op_type_t;
 
+typedef struct{
+    char key[MAX_KEY_LEN];
+    char value[MAX_VALUE_LEN];
+} settings_entry_t;
 
 typedef void (*settings_wq_callback_t)(int result, void *user_data);
 
@@ -80,7 +76,7 @@ int akira_settings_init(void);
  * @param max_len - Size of output buffer
  * @return 0 on success, negative on error
  */
-int akira_settings_get(const char *key, char *value, uint16_t max_len);
+int akira_settings_get(const char *key, char *value, size_t max_len);
 
 
 /**
@@ -107,14 +103,6 @@ int akira_settings_delete(const char *key);
  * @return 0 on success, 1 when done, negative on error
  */
 int akira_settings_list(settings_iterator_t *iter);
-/**
- * Change limits 
- * 
- * @param new_max_value_len - New max lenght for value 
- * @param new_max_keys - New max amount of keys
- * @return 0 on success, 1 when done, negative on error
- */
-int akira_settings_resize_limits(uint16_t new_max_value_len, uint16_t new_max_keys);
 
 /**
  * Set encrypted value
