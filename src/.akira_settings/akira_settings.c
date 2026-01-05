@@ -235,6 +235,7 @@ static struct {
 };
 
 /*----------------------------INIT FUNCTIONS---------------------------------------*/
+
 static int init_sd(void){
     int ret = fs_manager_exists("/SD:");
     if (ret <= 0) {
@@ -278,7 +279,9 @@ static int init_flash(void){
     LOG_INF("Flash type initialized (NVS mounted)");
     return 0;
 }
+
 /*----------------------------<TO DO>---------------------------------------*/
+
 static int migrate_data_to_sd(void){
     if(storage.type == AKIRA_SETTINGS_STORAGE_SD){
         LOG_WRN("Storage type is already SD");
@@ -420,6 +423,7 @@ static int settings_get_id(const char* key){
 }
 
 /*----------------------------SD OPERATIONS---------------------------------------*/
+
 static int sd_get_value(const char *namespace, const char *key, char *value, size_t max_len) {
     char filepath[MAX_FILEPATH_LEN];
 
@@ -667,6 +671,7 @@ static int sd_delete_value(const char *namespace, const char *key, const char *f
     
     return (ret >= 0) ? 0 : ret;
 }
+
 /*----------------------------INTERNAL API---------------------------------------*/
 
 static int settings_set(const char* key, const char* value){
@@ -856,6 +861,7 @@ static int settings_clear(void){
     return ret;
 }
 /*----------------------------WORK QUEUE---------------------------------------*/
+
 static void setting_work_handler(struct k_work *work) {
     struct akira_setting_work *sw = CONTAINER_OF(work, struct akira_setting_work, work);
     int result = -1;
@@ -935,7 +941,9 @@ static int submit_settings_work(struct akira_setting_work *work) {
     
     return 0;
 }
+
 /*----------------------------PUBLIC API---------------------------------------*/
+
 int akira_settings_init(void) {
     if (storage.initialized) {
         return 0;
@@ -1182,7 +1190,9 @@ int akira_settings_list(settings_iterator_t *iter) {
     }
     return -1;
 }
+
 /*----------------------------ASYNC API---------------------------------------*/
+
 int akira_settings_set_async(const char *key, const char *value, settings_wq_callback_t callback, void *user_data){
     if (!key || !value || !storage.initialized) {
         return -EINVAL;
@@ -1247,6 +1257,7 @@ int akira_settings_delete_async(const char *key,  settings_wq_callback_t callbac
     
     return submit_settings_work(work);
 }
+
 /*----------------------------ENCRYPTED API---------------------------------------*/
 
 int akira_settings_set_encrypted(const char *key, const char *value) {
@@ -1300,6 +1311,7 @@ int akira_settings_set_encrypted(const char *key, const char *value) {
 }
 
 /*----------------------------SHELL API---------------------------------------*/
+
 static int cmd_settings_get(const struct shell *sh, size_t argc, char **argv) {
     if (argc < 2) {
         shell_error(sh, "Usage: akira_settings get <key>");
