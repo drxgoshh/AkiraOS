@@ -11,6 +11,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
+
 #ifdef CONFIG_AKIRA_SETTINGS_ENCRYPTION
 #include <mbedtls/gcm.h>
 #include <mbedtls/platform.h>
@@ -18,6 +19,7 @@
 #endif
 
 LOG_MODULE_REGISTER(akira_settings, CONFIG_LOG_DEFAULT_LEVEL);
+
 
 /*----------------ENCRYPTION FUNCTIONS------------------------*/
 
@@ -275,12 +277,25 @@ static int init_flash(void){
         LOG_ERR("NVS mount failed: %d", ret);
         return ret;
     }
-
+    
+    uint16_t counter;
+    ret = nvs_read(&storage.nvs, SETTINGS_COUNTER_ID, &counter, sizeof(counter));
+    if(ret<0){
+        LOG_WRN("Failed to read SETTINGS_COUNTER_ID trying to initialize it(%d)", ret);
+        counter = 0;
+        ret = nvs_write(&storage.nvs, SETTINGS_COUNTER_ID, &counter, sizeof(counter));
+        if(ret<0){
+            LOG_ERR("Failed to initialize SETTINGS_COUNTER_ID (%d)", ret);
+            return ret;
+        }
+        LOG_INF("Initialized SETTINGS_COUNTER_ID to 0");
+    }
+    LOG_INF("Settings entries in flash: %d", counter);
     LOG_INF("Flash type initialized (NVS mounted)");
     return 0;
 }
 
-/*----------------------------<TO DO>---------------------------------------*/
+/*----------------------------<//TODO>---------------------------------------*/
 
 static int migrate_data_to_sd(void){
     if(storage.type == AKIRA_SETTINGS_STORAGE_SD){
@@ -689,18 +704,20 @@ static int settings_set(const char* key, const char* value){
         }
 
         int entry_id = settings_get_id(key);
-        if(entry_id < 0){ // Wasn't found ( need to write at counter + 1 )
+        if(entry_id < 0){ // Wasn't found ( need to write at SETTINGS_START_ID + counter )
             entry_id = SETTINGS_START_ID + counter;
             ret = nvs_write(&storage.nvs, entry_id, &entry, sizeof(entry));
             if(ret < 0){
                 LOG_WRN("Failed to add %s - %s at index %d", key, value, entry_id);
                 return ret;
             }
-            ret = nvs_write(&storage.nvs, SETTINGS_COUNTER_ID, &entry_id, sizeof(entry_id));
+            counter++;
+            ret = nvs_write(&storage.nvs, SETTINGS_COUNTER_ID, &counter, sizeof(entry_id));
             if(ret < 0){
-                LOG_WRN("Failed to increment counter %d -> %d", counter, entry_id);
+                LOG_WRN("Failed to increment counter %d -> %d", (counter - 1) , counter);
                 return ret;
             }
+            LOG_INF("COUNTER INCREMENTED TO %d", counter);
         }
         else{ // Was found just change the val
             ret = nvs_write(&storage.nvs, entry_id, &entry, sizeof(entry));
@@ -782,43 +799,77 @@ static int settings_get(const char* key, char* value, size_t max_len){
 
 static int settings_delete(const char* key){
     int ret = -1;
-    if (storage.type == AKIRA_SETTINGS_STORAGE_FLASH) {
+    if(storage.type == AKIRA_SETTINGS_STORAGE_FLASH) {
         int entry_id = settings_get_id(key);
-        if(entry_id < 0){
+        if(entry_id < 0) {
             LOG_WRN("Couldn't find key: %s", key);
             return entry_id;
         }
-        
-        ret = nvs_delete(&storage.nvs, entry_id);
-        
-        if (ret<0) {
-            LOG_WRN("Failed to delete %s at index %d", key, entry_id);
-            return ret;
-        }
+
         uint16_t counter;
         ret = nvs_read(&storage.nvs, SETTINGS_COUNTER_ID, &counter, sizeof(counter));
-        if(ret < 0){
+        if(ret < 0) {
             LOG_INF("Failed to read SETTINGS_COUNTER_ID (%d)", ret);
             return ret;
         }
-        counter++;
-        ret = nvs_write(&storage.nvs, SETTINGS_COUNTER_ID, &counter, sizeof(counter));
-        if(ret < 0){
-            LOG_WRN("Failed to increment counter %d -> %d", counter-1 , counter);
-            return ret;
+
+        if(counter == 0) {
+            LOG_WRN("No entries present but found id: %d", entry_id);
+            return -ENOENT;
         }
 
+        uint16_t last_index = counter - 1;
+        int last_entry_id = SETTINGS_START_ID + last_index;
+
+        /* If the deleted entry is not the last one, move the last entry into the
+         * deleted slot so that entries remain contiguous from SETTINGS_START_ID. */
+        if (entry_id != last_entry_id) {
+            settings_entry_t last_entry;
+            ret = nvs_read(&storage.nvs, last_entry_id, &last_entry, sizeof(last_entry));
+            if (ret < 0) {
+                LOG_WRN("Failed to read last entry at index: %d (%d)", last_entry_id, ret);
+                return ret;
+            }
+
+            ret = nvs_write(&storage.nvs, entry_id, &last_entry, sizeof(last_entry));
+            if (ret < 0) {
+                LOG_WRN("Failed to move last entry to index %d (%d)", entry_id, ret);
+                return ret;
+            }
+
+            /* Delete the previous last slot now that it was copied. */
+            ret = nvs_delete(&storage.nvs, last_entry_id);
+            if (ret < 0) {
+                LOG_WRN("Failed to delete last entry at index %d (%d)", last_entry_id, ret);
+                return ret;
+            }
+        } else {
+            /* Deleting the last entry directly */
+            ret = nvs_delete(&storage.nvs, entry_id);
+            if (ret < 0) {
+                LOG_WRN("Failed to delete %s at index %d", key, entry_id);
+                return ret;
+            }
+        }
+
+        counter--;
+        ret = nvs_write(&storage.nvs, SETTINGS_COUNTER_ID, &counter, sizeof(counter));
+        if (ret < 0) {
+            LOG_WRN("Failed to decrement counter to %d (%d)", counter, ret);
+            return ret;
+        }
+        LOG_INF("COUNTER DECREMENTED TO %d", counter);
+
         return 0;
-    }
-    else{
+    } else {
         char namespace[MAX_NAMESPACE_LEN];
         char local_key[MAX_KEY_LEN];
-        
+
         ret = parse_key(key, namespace, local_key);
         if (ret < 0) {
             return ret;
         }
-        
+
         ret = sd_delete_value(namespace, local_key, key);
         if (ret < 0) {
             return ret;
@@ -833,7 +884,11 @@ static int settings_clear(void){
     if (storage.type == AKIRA_SETTINGS_STORAGE_FLASH) {
         ret = nvs_clear(&storage.nvs);
         if (!ret) {
+            storage.initialized = false;
             ret = init_flash();
+            if(!ret){
+                storage.initialized = true;
+            }
         }
     } else {
         struct fs_dir_t dir;
@@ -860,6 +915,7 @@ static int settings_clear(void){
     }
     return ret;
 }
+
 /*----------------------------WORK QUEUE---------------------------------------*/
 
 static void setting_work_handler(struct k_work *work) {
@@ -1179,9 +1235,22 @@ int akira_settings_list(settings_iterator_t *iter) {
             LOG_WRN("Failed to read at index %d", entry_id);
             return ret;
         }
-
-        strncpy(iter->value, entry.value, sizeof(entry.value));
+        
+        if (strlen(entry.value) > MINIMUM_ENCRYPTED_LEN) {
+            uint8_t decoded[MAX_VALUE_LEN];
+            size_t decoded_len;
+            ret = base64_decode(decoded, sizeof(decoded), &decoded_len, 
+                                entry.value, strlen(entry.value));
+            
+            if (ret == 0 && crypto_is_encrypted(decoded, decoded_len)) {
+                ret = crypto_decrypt(decoded, decoded_len, entry.value, MAX_VALUE_LEN);
+                if(ret < 0){
+                    LOG_WRN("Failed to decrypt value at index %d", entry_id);
+                }
+            }
+        }
         strncpy(iter->key, entry.key, sizeof(entry.key));
+        strncpy(iter->value, entry.value, sizeof(entry.value));
         ++(iter->index);
         return 0;
     }
@@ -1540,8 +1609,8 @@ static int cmd_settings_info(const struct shell *sh, size_t argc, char **argv)
             shell_print(sh, "Current keys:     %d", registry_counter);
             shell_print(sh, "Available slots:  %d", MAX_KEYS - registry_counter);
             
-            float usage = (float)registry_counter / MAX_KEYS * 100.0f;
-            shell_print(sh, "Usage:            %1.f", usage);
+            int usage_x10 = (registry_counter * 1000) / MAX_KEYS;
+            shell_print(sh, "Usage:            %d.%d%%", usage_x10 / 10, usage_x10 % 10);
         }
     } else if (storage.type == AKIRA_SETTINGS_STORAGE_SD) {
         LOG_INF("Not implemented yet for SD");

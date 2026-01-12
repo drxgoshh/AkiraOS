@@ -645,6 +645,10 @@ endmenu
 
 menu "Akira Settings"
 
+config AKIRA_SETTINGS_MANAGER
+    bool "Enable Akira Settings Manager"
+    default y
+
 config AKIRA_SETTINGS_MAX_KEYS
     int "Maximum number of keys"
     default 100

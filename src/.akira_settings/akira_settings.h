@@ -41,6 +41,7 @@ typedef struct {
     char* key;   
     char* value; 
 } settings_iterator_t;
+
 typedef enum{
     AKIRA_SETTINGS_STORAGE_FLASH = 0,
     AKIRA_SETTINGS_STORAGE_SD,
@@ -113,5 +114,30 @@ int akira_settings_list(settings_iterator_t *iter);
  */
 int akira_settings_set_encrypted(const char *key, const char *value);
 
+
+/**
+ * Async set Key to Value
+ * 
+ * @param key - Key
+ * @param value - Value to store
+ * @param callback - Callback function when operation is done
+ * @param user_data - User data for callback
+ * @return 0 on success, negative on error
+ */
+int akira_settings_set_async(const char *key, const char *value, settings_wq_callback_t callback, void *user_data);
+
+/**
+ * Async delete Key
+ * 
+ * @param key - Key to remove
+ * @param callback - Callback function when operation is done
+ * @param user_data - User data for callback
+ * @return 0 on success, negative on error
+ */
+int akira_settings_delete_async(const char *key,  settings_wq_callback_t callback, void *user_data);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif //AKIRA_SETTINGS_H
