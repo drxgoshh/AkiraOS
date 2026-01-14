@@ -603,10 +603,6 @@ static int sd_set_value(const char *namespace, const char *key, const char *valu
     if (old_content) k_free(old_content);
     k_free(new_content);
     
-    if (ret >= 0 && is_new_key && !found) {
-        //registry_add_key(full_key);
-    }
-    
     return (ret >= 0) ? 0 : ret;
 }
 
@@ -681,7 +677,6 @@ static int sd_delete_value(const char *namespace, const char *key, const char *f
     k_free(new_content);
     
     if (ret >= 0) {
-        //registry_delete_key(full_key);
     }
     
     return (ret >= 0) ? 0 : ret;
@@ -693,8 +688,10 @@ static int settings_set(const char* key, const char* value){
     int ret = -1;
     if (storage.type == AKIRA_SETTINGS_STORAGE_FLASH) {
         settings_entry_t entry;
-        strcpy(entry.key, key);
-        strcpy(entry.value, value);
+        strncpy(entry.key, key, sizeof(entry.key) - 1);
+        entry.key[sizeof(entry.key) - 1] = '\0';
+        strncpy(entry.value, value, sizeof(entry.value) - 1);
+        entry.value[sizeof(entry.value) - 1] = '\0';
 
         uint16_t counter;
         ret = nvs_read(&storage.nvs, SETTINGS_COUNTER_ID, &counter, sizeof(counter));
@@ -712,7 +709,7 @@ static int settings_set(const char* key, const char* value){
                 return ret;
             }
             counter++;
-            ret = nvs_write(&storage.nvs, SETTINGS_COUNTER_ID, &counter, sizeof(entry_id));
+            ret = nvs_write(&storage.nvs, SETTINGS_COUNTER_ID, &counter, sizeof(counter));
             if(ret < 0){
                 LOG_WRN("Failed to increment counter %d -> %d", (counter - 1) , counter);
                 return ret;
@@ -728,7 +725,11 @@ static int settings_set(const char* key, const char* value){
         }
         return 0;
     }
-    else{
+    else{ 
+        if(!storage.sd_available){ 
+            LOG_INF("SD card not available");
+            return -ENOTSUP;
+        } 
         char namespace[MAX_NAMESPACE_LEN];
         char local_key[MAX_KEY_LEN];
         
@@ -738,6 +739,7 @@ static int settings_set(const char* key, const char* value){
         }
         
         ret = sd_set_value(namespace, local_key, value, key);
+        return ret;
     }
     return -1;
 }
@@ -760,9 +762,14 @@ static int settings_get(const char* key, char* value, size_t max_len){
             LOG_WRN("Failed to read key %s at index %d", key, entry_id);
             return ret;
         }
-        strncpy(temp_buf, entry.value, MAX_VALUE_LEN);
+        strncpy(temp_buf, entry.value, MAX_VALUE_LEN - 1);
+        temp_buf[MAX_VALUE_LEN - 1] = '\0';
     }
     else {
+        if(!storage.sd_available){ 
+            LOG_INF("SD card not available");
+            return -ENOTSUP;
+        } 
         char namespace[MAX_NAMESPACE_LEN];
         char local_key[MAX_KEY_LEN];
         
@@ -772,8 +779,7 @@ static int settings_get(const char* key, char* value, size_t max_len){
         }
         
         ret = sd_get_value(namespace, local_key, temp_buf, sizeof(temp_buf));
-        
-        if (ret < 0) {
+        if(ret < 0){
             return ret;
         }
     }
@@ -862,21 +868,22 @@ static int settings_delete(const char* key){
 
         return 0;
     } else {
+        if(!storage.sd_available){
+            LOG_INF("SD card not available");
+            return -ENOTSUP;
+        }
         char namespace[MAX_NAMESPACE_LEN];
         char local_key[MAX_KEY_LEN];
-
+        
         ret = parse_key(key, namespace, local_key);
         if (ret < 0) {
             return ret;
         }
-
+        
         ret = sd_delete_value(namespace, local_key, key);
-        if (ret < 0) {
-            return ret;
-        }
-        return 0;
+        return ret;
     }
-    return ret;
+    return -1;
 }
 
 static int settings_clear(void){
@@ -891,6 +898,10 @@ static int settings_clear(void){
             }
         }
     } else {
+        if(!storage.sd_available){
+            LOG_INF("SD card not available");
+            return -ENOTSUP;
+        }
         struct fs_dir_t dir;
         fs_dir_t_init(&dir);
         
@@ -909,7 +920,6 @@ static int settings_clear(void){
             fs_closedir(&dir);
         }
         
-        fs_manager_delete_file("/SD:/settings/.registry.txt");
         
         ret = 0;
     }
@@ -972,7 +982,7 @@ static void setting_work_handler(struct k_work *work) {
         k_sem_give(sw->completion_sem);
     }
     
-    if (sw->callback) {
+    if (sw->callback) { // If the callback exits means its async so we need to free the key and value
         if (sw->key) k_free(sw->key);
         if (sw->type == AKIRA_SETTINGS_OP_SET && sw->value) {
             k_free(sw->value);
@@ -984,7 +994,7 @@ static void setting_work_handler(struct k_work *work) {
 
 static int submit_settings_work(struct akira_setting_work *work) {
     if (!storage.initialized) {
-        if (work->callback) {
+        if (work->callback) { // If the callback exits means its async so we need to free the key and value if its not initialized
             if (work->key) k_free(work->key);
             if (work->type == AKIRA_SETTINGS_OP_SET && work->value) k_free(work->value);
         }
@@ -1249,8 +1259,10 @@ int akira_settings_list(settings_iterator_t *iter) {
                 }
             }
         }
-        strncpy(iter->key, entry.key, sizeof(entry.key));
-        strncpy(iter->value, entry.value, sizeof(entry.value));
+        strncpy(iter->key, entry.key, MAX_KEY_LEN - 1);
+        iter->key[MAX_KEY_LEN - 1] = '\0';
+        strncpy(iter->value, entry.value, MAX_VALUE_LEN - 1);
+        iter->value[MAX_VALUE_LEN - 1] = '\0';
         ++(iter->index);
         return 0;
     }
@@ -1266,14 +1278,17 @@ int akira_settings_set_async(const char *key, const char *value, settings_wq_cal
     if (!key || !value || !storage.initialized) {
         return -EINVAL;
     }
-    
+    if(!callback){
+        LOG_INF("Callback cannot be NULL for async operations");
+        return -EINVAL;
+    }
     if (strlen(value) >= MAX_VALUE_LEN) {
         LOG_ERR("Value too long: %zu >= %d", strlen(value), MAX_VALUE_LEN);
         return -E2BIG;
     }
 
-    if (strlen(key) >= MAX_VALUE_LEN) {
-        LOG_ERR("Key too long: %zu >= %d", strlen(key), MAX_VALUE_LEN);
+    if (strlen(key) >= MAX_KEY_LEN) {
+        LOG_ERR("Key too long: %zu >= %d", strlen(key), MAX_KEY_LEN);
         return -E2BIG;
     }
 
@@ -1559,7 +1574,7 @@ static int cmd_settings_clear(const struct shell *sh, size_t argc, char **argv)
         shell_print(sh, "");
         shell_warn(sh, "⚠️  WARNING: This will DELETE ALL stored data!");
         shell_warn(sh, "⚠️  This action CANNOT be undone!");
-        shell_warn(sh, "⚠️  All keys, values, and the registry will be erased!");
+        shell_warn(sh, "⚠️  All keys - values pairs will be erased!");
         shell_print(sh, "");
         shell_print(sh, "To proceed, type:");
         shell_print(sh, "  akira_settings clear confirm");
@@ -1602,14 +1617,14 @@ static int cmd_settings_info(const struct shell *sh, size_t argc, char **argv)
 #endif
     
     if (storage.type == AKIRA_SETTINGS_STORAGE_FLASH) {
-        uint16_t registry_counter;
-        int ret = nvs_read(&storage.nvs, SETTINGS_COUNTER_ID, &registry_counter, sizeof(registry_counter));
+        uint16_t counter;
+        int ret = nvs_read(&storage.nvs, SETTINGS_COUNTER_ID, &counter, sizeof(counter));
         
         if (ret >= 0) {
-            shell_print(sh, "Current keys:     %d", registry_counter);
-            shell_print(sh, "Available slots:  %d", MAX_KEYS - registry_counter);
+            shell_print(sh, "Current keys:     %d", counter);
+            shell_print(sh, "Available slots:  %d", MAX_KEYS - counter);
             
-            int usage_x10 = (registry_counter * 1000) / MAX_KEYS;
+            int usage_x10 = (counter * 1000) / MAX_KEYS;
             shell_print(sh, "Usage:            %d.%d%%", usage_x10 / 10, usage_x10 % 10);
         }
     } else if (storage.type == AKIRA_SETTINGS_STORAGE_SD) {

@@ -2,8 +2,6 @@
 * @file akira_settings.h
 * @brief Key-value settings storage with NVS backend
 *
-* GET/SET/DELETE/LIST functions
-* Stored Keys in a registry
 *
 */
 
